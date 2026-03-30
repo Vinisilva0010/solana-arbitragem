@@ -1,90 +1,100 @@
 Solana Arbitragem
-Este projeto implementa um bot de arbitragem na blockchain Solana utilizando Rust. O objetivo é identificar oportunidades de preço entre diferentes mercados e executar ordens de compra e venda de forma automatizada e segura.
+Este projeto é um bot de arbitragem em modo simulação segura para a blockchain Solana, escrito em Rust. Ele consulta a API da Jupiter para avaliar, em loop, se existe oportunidade de lucro ao fazer um ciclo SOL → USDC → SOL, levando em conta um custo mínimo estimado de taxas on-chain.
 
-Visão geral
-O bot se conecta à rede Solana, consulta dados de mercado em tempo real e avalia oportunidades de arbitragem com base em regras configuráveis.
-A lógica principal do projeto está localizada no diretório src/. Os arquivos log_seguro.txt e relatorio.txt são utilizados para registro das operações e geração de relatórios das execuções.
+Como o bot funciona
+O bot usa reqwest para chamar a API pública da Jupiter (/swap/v1/quote) duas vezes por ciclo: primeira cotação de SOL para USDC e, em seguida, de USDC para SOL. Com base nesses dois valores, ele calcula a diferença entre o saldo inicial em SOL e o saldo final simulado após o round trip.
 
-Funcionalidades
-O projeto inclui, ou tem como objetivo incluir, as seguintes funcionalidades principais:
+Em seguida, ele compara essa diferença com um custo estimado de rede de 80.000 lamports (fees base + prioridade) e só considera uma oportunidade “real” se o lucro bruto for maior que esse custo. Além disso, existe uma trava de segurança: se o lucro líquido for maior que 50% do investimento em uma única operação, o bot trata como possível bug/honeypot da API e ignora o sinal.
 
-Conexão com a rede Solana (RPC)
+O bot não envia nenhuma transação on-chain no estado atual: ele só simula, loga e imprime as oportunidades detectadas.
 
-Consulta de preços e dados de mercado em diferentes fontes
+Configuração atual (do código)
+As configurações principais estão hardcoded em src/main.rs:
 
-Cálculo de oportunidades de arbitragem entre pares selecionados
+API da Jupiter: https://api.jup.ag/swap/v1/quote
 
-Execução de ordens de compra e venda quando condições pré-definidas são satisfeitas
+Header x-api-key: valor definido em my_api_key no código
 
-Registro detalhado das operações em arquivos de log e relatórios (log_seguro.txt, relatorio.txt)
+Mint de entrada (SOL): So11111111111111111111111111111111111111112
+
+Mint de saída (USDC): EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
+
+Quantidade por operação: sol_inicial = 50_000_000u64 (0,05 SOL)
+
+Slippage: slippageBps=50 (0,5%) em ambas as cotações
+
+Custo estimado de rede: 80_000 lamports (break-even mínimo)
+
+Trava de segurança de lucro: lucro_liquido > sol_inicial / 2 é tratado como suspeito e ignorado
+
+Para a carteira, o código tenta carregar meu-bot.json via read_keypair_file; se não encontrar, cria um Keypair::new() apenas para ter uma public key para exibição. Como não há envio de transações, essa chave não é usada para gastar fundos no estado atual.
+
+Fluxo de execução
+Inicializa o cliente HTTP (reqwest::Client) aceitando certificados inválidos (danger_accept_invalid_certs(true)).
+
+Tenta carregar a keypair de meu-bot.json; se falhar, gera uma carteira fake para exibir o pubkey.
+
+Entra em um loop infinito (loop { ... }) com as etapas:
+
+Cota SOL → USDC com o valor sol_inicial.
+
+Lê o campo outAmount retornado e converte para u64 (USDC em unidades mínimas).
+
+Cota USDC → SOL usando o outAmount da primeira cotação.
+
+Lê o campo outAmount da segunda cotação (SOL final) e converte para u64.
+
+Calcula diff = sol_final - sol_inicial e aplica as regras de custo e segurança.
+
+Se for lucro considerado real, imprime informações detalhadas no terminal e grava uma linha em log_seguro.txt com o lucro líquido e timestamp.
+
+Se não houver oportunidade, apenas imprime pontos no stdout para indicar que o bot está rodando.
+
+Entre cada iteração completa, o bot dorme 2 segundos; após uma oportunidade real, dorme 10 segundos para não floodar o log.
+
+Logs e relatórios
+O bot escreve logs em um arquivo log_seguro.txt na raiz do projeto. Cada oportunidade real encontrada gera uma linha no formato:
+
+text
+REAL: Lucro Líquido <valor> lamports | Data: <SystemTime>
+Atualmente não há escrita estruturada em relatorio.txt no código fornecido; esse arquivo existe no repositório, mas ainda não é atualizado por main.rs.
 
 Requisitos
-Para compilar e executar este projeto, você precisa de:
+Para rodar o projeto, você precisa de:
 
-Rust e Cargo instalados (toolchain está especificado em Cargo.toml)
+Rust e Cargo instalados (veja Cargo.toml para detalhes de dependências).
 
-Acesso a um endpoint RPC da rede Solana (por exemplo, mainnet ou devnet)
+Acesso à internet para consultar a API da Jupiter.
 
-Uma carteira Solana configurada com as permissões necessárias para assinar transações
-
-Variáveis de ambiente ou arquivos de configuração contendo chaves privadas e endpoints (não versionados no repositório)
+Opcional: um arquivo meu-bot.json com uma keypair Solana válida, caso queira mostrar sua própria carteira no log.
 
 Instalação
-Clone o repositório e instale as dependências:
+Clone o repositório e faça o build:
 
 bash
 git clone https://github.com/Vinisilva0010/solana-arbitragem.git
 cd solana-arbitragem
 cargo build --release
-Uso
-Após a compilação, você pode executar o binário principal:
+Execução
+Para iniciar o bot em modo simulação segura:
 
 bash
 cargo run --release
-Antes de rodar, certifique-se de:
+Antes de rodar, revise diretamente em src/main.rs:
 
-Configurar as variáveis de ambiente necessárias (por exemplo, RPC_URL, KEYPAIR_PATH, etc.)
+O valor de sol_inicial que você quer simular.
 
-Ajustar, se existir, o arquivo de configuração do bot para definir pares de negociação, limites de risco e parâmetros de arbitragem.
+O custo estimado de rede (custo_estimado_rede).
 
-Os resultados e logs de execução serão registrados em log_seguro.txt e relatorio.txt na raiz do projeto.
+O my_api_key usado para acessar a API da Jupiter.
 
-Estrutura do projeto
-A estrutura principal do repositório é:
+Lembre que, na versão atual, nenhuma transação é enviada para a rede Solana: tudo é simulado a partir das cotações da API.
 
-src/ — código-fonte Rust do bot de arbitragem
+Avisos de segurança
+Mesmo em modo simulação, este tipo de projeto normalmente evolui para enviar transações reais, então é importante manter boas práticas desde o início:
 
-Cargo.toml — arquivo de configuração do projeto e dependências Rust
+Não faça commit de chaves privadas (como meu-bot.json) nem de API keys sensíveis.
 
-Cargo.lock — versões exatas das dependências utilizadas
+Use variáveis de ambiente ou arquivos ignorados no .gitignore para credenciais.
 
-log_seguro.txt — log seguro de execuções e eventos relevantes
-
-relatorio.txt — relatório consolidado de operações e métricas do bot
-
-Segurança
-Este projeto lida com chaves privadas e movimentação de fundos na rede Solana.
-Boas práticas recomendadas:
-
-Nunca faça commit de chaves privadas ou arquivos de configuração sensíveis
-
-Use variáveis de ambiente ou um gerenciador de segredos
-
-Teste sempre em devnet ou em ambiente isolado antes de operar em mainnet
-
-Revise cuidadosamente qualquer alteração em lógica de risco e execução
-
-Roadmap
-Possíveis melhorias planejadas:
-
-Suporte a múltiplas DEXs em Solana
-
-Estratégias adicionais de arbitragem (triangular, cross-DEX)
-
-Painel de monitoramento em tempo real
-
-Testes automatizados e integração contínua
-
-Licença
-Defina aqui a licença do projeto (por exemplo, MIT, Apache 2.0, ou proprietária).
-Se ainda não escolheu uma licença, considere adicionar um arquivo LICENSE na raiz do repositório.
+Teste sempre com pequenas quantidades e entenda o comportamento da Jupiter e das taxas antes de arriscar fundos reais.
